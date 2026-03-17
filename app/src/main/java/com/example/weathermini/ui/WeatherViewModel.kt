@@ -7,11 +7,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.weathermini.data.model.CityDto
 import com.example.weathermini.data.model.WeatherResponse
-import com.example.weathermini.data.remote.RetrofitClient
+import com.example.weathermini.data.repository.WeatherRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-
+import javax.inject.Inject
 
 sealed interface SearchUiState {
     object Idle : SearchUiState
@@ -27,7 +32,10 @@ sealed interface WeatherDetailState {
     data class Error(val message: String) : WeatherDetailState
 }
 
-class WeatherViewModel : ViewModel() {
+@HiltViewModel
+class WeatherViewModel @Inject constructor(
+    private val repository: WeatherRepository
+) : ViewModel() {
 
     var searchState: SearchUiState by mutableStateOf(SearchUiState.Idle)
         private set
@@ -37,14 +45,25 @@ class WeatherViewModel : ViewModel() {
 
     var searchQuery by mutableStateOf("")
         private set
+
     private var searchJob: Job? = null
 
-    var favoriteCities by mutableStateOf<List<CityDto>>(emptyList())
-        private set
+    val favoriteCities: StateFlow<List<CityDto>> = repository
+        .observeFavourites()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
 
-    val favoriteIds: Set<Int>
-        get() = favoriteCities.map { it.id }.toSet()
-
+    val favoriteIds: StateFlow<Set<Int>> = repository
+        .observeFavourites()
+        .map { list -> list.map { it.id }.toSet() }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptySet()
+        )
 
 
     fun onSearchQueryChange(newQuery: String) {
@@ -57,46 +76,43 @@ class WeatherViewModel : ViewModel() {
         }
 
         searchJob = viewModelScope.launch {
-            delay(500) // Debounce
+            delay(500)
             performSearch(newQuery)
         }
     }
 
     private suspend fun performSearch(query: String) {
         searchState = SearchUiState.Loading
-        try {
-            val response = RetrofitClient.api.searchCity(name = query)
-            searchState = if (response.results.isNullOrEmpty()) {
-                SearchUiState.Empty
-            } else {
-                SearchUiState.Success(response.results)
-            }
+        searchState = try {
+            val results = repository.searchCities(query)
+            if (results.isEmpty()) SearchUiState.Empty
+            else SearchUiState.Success(results)
         } catch (e: Exception) {
-            searchState = SearchUiState.Error("Ошибка: ${e.localizedMessage}")
+            SearchUiState.Error("Ошибка: ${e.localizedMessage}")
         }
     }
+
 
     fun loadWeather(lat: Double, lon: Double, name: String) {
         detailState = WeatherDetailState.Loading
         viewModelScope.launch {
-            try {
-                val weather = RetrofitClient.api.getWeather(lat, lon)
-                detailState = WeatherDetailState.Success(weather, name)
+            detailState = try {
+                val weather = repository.getWeather(lat, lon)
+                WeatherDetailState.Success(weather, name)
             } catch (e: Exception) {
-                detailState = WeatherDetailState.Error("Не удалось загрузить")
+                WeatherDetailState.Error("Не удалось загрузить")
             }
         }
     }
 
-    fun toggleFavorite(city: CityDto) {
-        val currentList = favoriteCities.toMutableList()
-        val existing = currentList.find { it.id == city.id }
 
-        if (existing != null) {
-            currentList.remove(existing)
-        } else {
-            currentList.add(city)
+    fun toggleFavorite(city: CityDto) {
+        viewModelScope.launch {
+            if (repository.isFavourite(city.id)) {
+                repository.removeFavourite(city)
+            } else {
+                repository.addFavourite(city)
+            }
         }
-        favoriteCities = currentList
     }
 }

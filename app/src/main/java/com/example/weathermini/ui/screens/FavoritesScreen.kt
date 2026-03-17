@@ -11,17 +11,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.weathermini.data.model.CityDto
-import com.example.weathermini.ui.WeatherViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FavoritesScreen(
-    viewModel: WeatherViewModel,
+    favorites: List<CityDto>,
     onCityClick: (CityDto) -> Unit,
+    onFavoriteClick: (CityDto) -> Unit,
     onBack: () -> Unit
 ) {
-    val favorites = viewModel.favoriteCities
-
     Scaffold(
         topBar = {
             TopAppBar(
@@ -35,17 +33,18 @@ fun FavoritesScreen(
         }
     ) { padding ->
         if (favorites.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("Список пуст")
-            }
+            Box(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentAlignment = Alignment.Center
+            ) { Text("Список пуст") }
         } else {
             LazyColumn(modifier = Modifier.padding(padding).padding(16.dp)) {
-                items(favorites) { city ->
+                items(favorites, key = { it.id }) { city ->
                     CityItem(
                         city = city,
                         isFavorite = true,
                         onClick = { onCityClick(city) },
-                        onFavoriteClick = { viewModel.toggleFavorite(city) }
+                        onFavoriteClick = { onFavoriteClick(city) }
                     )
                 }
             }

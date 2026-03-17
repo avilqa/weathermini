@@ -20,13 +20,12 @@ import com.example.weathermini.ui.WeatherViewModel
 @Composable
 fun SearchScreen(
     viewModel: WeatherViewModel,
+    favoriteIds: Set<Int>,
     onCityClick: (CityDto) -> Unit,
     onNavigateToFavorites: () -> Unit
 ) {
     val state = viewModel.searchState
     val query = viewModel.searchQuery
-
-    val favoriteIds = viewModel.favoriteIds
 
     Scaffold(
         topBar = {
@@ -52,32 +51,30 @@ fun SearchScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             when (state) {
-                is SearchUiState.Loading -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
-                }
-                is SearchUiState.Empty -> {
+                is SearchUiState.Loading -> Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) { CircularProgressIndicator() }
+
+                is SearchUiState.Empty ->
                     Text("Города не найдены")
-                }
-                is SearchUiState.Error -> {
+
+                is SearchUiState.Error ->
                     Text(text = state.message, color = MaterialTheme.colorScheme.error)
-                }
-                is SearchUiState.Success -> {
-                    LazyColumn {
-                        items(state.cities) { city ->
-                            CityItem(
-                                city = city,
-                                isFavorite = favoriteIds.contains(city.id),
-                                onClick = { onCityClick(city) },
-                                onFavoriteClick = { viewModel.toggleFavorite(city) }
-                            )
-                        }
+
+                is SearchUiState.Success -> LazyColumn {
+                    items(state.cities) { city ->
+                        CityItem(
+                            city = city,
+                            isFavorite = favoriteIds.contains(city.id),
+                            onClick = { onCityClick(city) },
+                            onFavoriteClick = { viewModel.toggleFavorite(city) }
+                        )
                     }
                 }
-                is SearchUiState.Idle -> {
+
+                is SearchUiState.Idle ->
                     Text("Введите название города", color = Color.Gray)
-                }
             }
         }
     }
