@@ -1,9 +1,7 @@
 package com.example.weathermini.ui.navigation
 
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.hilt.navigation.compose.hiltViewModel   // ← NEW import
+import androidx.compose.runtime.*
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -22,10 +20,8 @@ fun WeatherNavGraph() {
     NavHost(navController = navController, startDestination = "search") {
 
         composable("search") {
-            val favoriteIds by viewModel.favoriteIds.collectAsState()
             SearchScreen(
                 viewModel = viewModel,
-                favoriteIds = favoriteIds,
                 onCityClick = { city ->
                     navController.navigate("detail/${city.latitude}/${city.longitude}/${city.name}")
                 },
@@ -58,7 +54,6 @@ fun WeatherNavGraph() {
             val lat = backStackEntry.arguments?.getFloat("lat")?.toDouble() ?: 0.0
             val lon = backStackEntry.arguments?.getFloat("lon")?.toDouble() ?: 0.0
             val name = backStackEntry.arguments?.getString("name") ?: ""
-
             DetailScreen(
                 viewModel = viewModel,
                 lat = lat,
