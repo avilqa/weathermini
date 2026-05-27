@@ -9,7 +9,6 @@ import java.io.IOException
 
 class FakeWeatherApi : WeatherApi {
 
-    // Настраивается в каждом тесте
     var citiesToReturn: List<CityDto> = emptyList()
     var weatherToReturn: WeatherResponse =
         WeatherResponse(CurrentWeather(temperature = 20.0, windSpeed = 5.0, weatherCode = 1))

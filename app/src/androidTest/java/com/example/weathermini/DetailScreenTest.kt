@@ -3,6 +3,8 @@ package com.example.weathermini
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.example.weathermini.data.datastore.AppPreferences
+import com.example.weathermini.data.datastore.AppSettings
 import com.example.weathermini.data.model.CurrentWeather
 import com.example.weathermini.data.model.WeatherResponse
 import com.example.weathermini.data.repository.WeatherRepository
@@ -20,14 +22,17 @@ class DetailScreenTest {
     @get:Rule
     val composeTestRule = createComposeRule()
 
-
     private fun makeViewModel(
         weatherResult: suspend () -> WeatherResponse
     ): WeatherViewModel {
         val repo = mockk<WeatherRepository>(relaxed = true)
+        val prefs = mockk<AppPreferences>(relaxed = true)
+
         every { repo.observeFavourites() } returns flowOf(emptyList())
+        every { prefs.settings } returns flowOf(AppSettings())
         coEvery { repo.getWeather(any(), any()) } coAnswers { weatherResult() }
-        return WeatherViewModel(repo)
+
+        return WeatherViewModel(repo, prefs)
     }
 
     @Test
@@ -37,9 +42,11 @@ class DetailScreenTest {
         composeTestRule.setContent {
             DetailScreen(
                 viewModel = viewModel,
-                lat = 55.75, lon = 37.62,
+                lat = 55.75,
+                lon = 37.62,
                 cityName = "Moscow",
-                onBack = {}
+                onBack = {},
+                onOpenNotes = { _, _, _ -> }
             )
         }
 
@@ -54,30 +61,42 @@ class DetailScreenTest {
     @Test
     fun clicking_Retry_triggers_new_request_and_shows_Success() {
         var callCount = 0
+
         val successWeather = WeatherResponse(
-            CurrentWeather(temperature = 15.0, windSpeed = 3.0, weatherCode = 0)
+            CurrentWeather(
+                temperature = 15.0,
+                windSpeed = 3.0,
+                weatherCode = 0
+            )
         )
 
         val repo = mockk<WeatherRepository>(relaxed = true)
+        val prefs = mockk<AppPreferences>(relaxed = true)
+
         every { repo.observeFavourites() } returns flowOf(emptyList())
+        every { prefs.settings } returns flowOf(AppSettings())
         coEvery { repo.getWeather(any(), any()) } coAnswers {
             callCount++
-            if (callCount == 1) throw Exception("First attempt fails")
-            else successWeather
+            if (callCount == 1) {
+                throw Exception("First attempt fails")
+            } else {
+                successWeather
+            }
         }
 
-        val viewModel = WeatherViewModel(repo)
+        val viewModel = WeatherViewModel(repo, prefs)
 
         composeTestRule.setContent {
             DetailScreen(
                 viewModel = viewModel,
-                lat = 55.75, lon = 37.62,
+                lat = 55.75,
+                lon = 37.62,
                 cityName = "Moscow",
-                onBack = {}
+                onBack = {},
+                onOpenNotes = { _, _, _ -> }
             )
         }
 
-        // Ждём появления Retry
         composeTestRule.waitUntil(timeoutMillis = 5_000) {
             composeTestRule.onAllNodesWithText("Retry").fetchSemanticsNodes().isNotEmpty()
         }
@@ -85,10 +104,8 @@ class DetailScreenTest {
         composeTestRule.onNodeWithText("Retry").assertIsDisplayed()
         val countAfterFirst = callCount
 
-        // Нажимаем Retry
         composeTestRule.onNodeWithText("Retry").performClick()
 
-        // Ждём появления температуры
         composeTestRule.waitUntil(timeoutMillis = 5_000) {
             composeTestRule.onAllNodesWithText("15.0°C").fetchSemanticsNodes().isNotEmpty()
         }

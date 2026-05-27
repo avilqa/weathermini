@@ -1,10 +1,13 @@
 package com.example.weathermini
 
 import app.cash.turbine.test
+import com.example.weathermini.data.datastore.AppPreferences
+import com.example.weathermini.data.datastore.AppSettings
 import com.example.weathermini.data.model.CityDto
 import com.example.weathermini.data.model.CurrentWeather
 import com.example.weathermini.data.model.WeatherResponse
 import com.example.weathermini.data.repository.WeatherRepository
+import com.example.weathermini.data.repository.WeatherResult
 import com.example.weathermini.ui.SearchUiState
 import com.example.weathermini.ui.WeatherDetailState
 import com.example.weathermini.ui.WeatherViewModel
@@ -24,6 +27,7 @@ class WeatherViewModelTest {
     val mainDispatcherRule = MainDispatcherRule()
 
     private lateinit var repository: WeatherRepository
+    private lateinit var prefs: AppPreferences
     private lateinit var viewModel: WeatherViewModel
 
     private val testCity = CityDto(
@@ -38,76 +42,94 @@ class WeatherViewModelTest {
     @Before
     fun setUp() {
         repository = mockk(relaxed = true)
+        prefs = mockk()
         every { repository.observeFavourites() } returns flowOf(emptyList())
-        viewModel = WeatherViewModel(repository)
+        every { prefs.settings } returns flowOf(AppSettings())
+        viewModel = WeatherViewModel(repository, prefs)
     }
 
-    // ── Тест 1: начальное состояние (нетривиальный)
     @Test
-    fun `initial search state is Idle`() {
-        assertEquals(SearchUiState.Idle, viewModel.searchState)
+    fun `initial search state is Idle`() = runTest {
+        viewModel.searchUiState.test {
+            assertEquals(SearchUiState.Idle, awaitItem())
+            cancel()
+        }
     }
 
-    // ── Тест 2: полная последовательность Loading → Success (Flow-тест)
     @Test
     fun `search success - transitions through Loading then reaches Success`() = runTest {
         coEvery { repository.searchCities("Moscow") } returns listOf(testCity)
 
-        // До дебаунса — состояние ещё Idle
-        viewModel.onSearchQueryChange("Moscow")
-        assertEquals(SearchUiState.Idle, viewModel.searchState)
+        viewModel.searchUiState.test {
+            awaitItem()
 
-        // Пропускаем дебаунс 500 мс
-        advanceTimeBy(501)
-        runCurrent()
+            viewModel.onSearchQueryChange("Moscow")
+            awaitItem()
 
-        assertEquals(SearchUiState.Success(listOf(testCity)), viewModel.searchState)
+            advanceTimeBy(501)
+            val result = awaitItem()
+            assertTrue("Ожидали Success, получили: $result", result is SearchUiState.Success)
+            val cities = (result as SearchUiState.Success).cities
+            assertEquals(1, cities.size)
+            assertEquals(testCity, cities[0].city)
+
+            cancel()
+        }
     }
 
-    // ── Тест 3: ошибка сети → Error
     @Test
     fun `search error - state transitions to Error`() = runTest {
         coEvery { repository.searchCities(any()) } throws Exception("Network error")
 
-        viewModel.onSearchQueryChange("Moscow")
-        advanceTimeBy(501)
-        runCurrent()
-
-        assertTrue(viewModel.searchState is SearchUiState.Error)
+        viewModel.searchUiState.test {
+            awaitItem() // Idle
+            viewModel.onSearchQueryChange("Moscow")
+            awaitItem() // Loading
+            advanceTimeBy(501)
+            val result = awaitItem()
+            assertTrue("Ожидали Error, получили: $result", result is SearchUiState.Error)
+            cancel()
+        }
     }
 
-    // ── Тест 4: пустой результат → Empty, НЕ Success (нетривиальный)
     @Test
     fun `empty search result sets Empty state not Success with empty list`() = runTest {
         coEvery { repository.searchCities(any()) } returns emptyList()
 
-        viewModel.onSearchQueryChange("xyz123")
-        advanceTimeBy(501)
-        runCurrent()
-
-        assertEquals(SearchUiState.Empty, viewModel.searchState)
-        // Явно проверяем что это НЕ Success(emptyList())
-        assertNotEquals(SearchUiState.Success(emptyList()), viewModel.searchState)
+        viewModel.searchUiState.test {
+            awaitItem() // Idle
+            viewModel.onSearchQueryChange("xyz123")
+            awaitItem() // Loading
+            advanceTimeBy(501)
+            val result = awaitItem()
+            assertEquals("Ожидали Empty", SearchUiState.Empty, result)
+            assertNotEquals(SearchUiState.Success(emptyList()), result)
+            cancel()
+        }
     }
 
-    // ── Тест 5: loadWeather успех
     @Test
     fun `loadWeather success sets WeatherDetailState Success`() = runTest {
-        coEvery { repository.getWeather(55.75, 37.62) } returns testWeather
+        coEvery {
+            repository.getWeatherOfflineFirst(55.75, 37.62, "Moscow")
+        } returns WeatherResult.Fresh(testWeather)
 
         viewModel.loadWeather(55.75, 37.62, "Moscow")
         runCurrent()
 
-        assertEquals(
-            WeatherDetailState.Success(testWeather, "Moscow"),
-            viewModel.detailState
-        )
+        val state = viewModel.detailState
+        assertTrue("Ожидали Success", state is WeatherDetailState.Success)
+        val success = state as WeatherDetailState.Success
+        assertEquals(testWeather, success.weather)
+        assertEquals("Moscow", success.cityName)
+        assertFalse(success.fromCache)
     }
 
-    // ── Тест 6: loadWeather ошибка
     @Test
     fun `loadWeather error sets WeatherDetailState Error`() = runTest {
-        coEvery { repository.getWeather(any(), any()) } throws Exception("error")
+        coEvery {
+            repository.getWeatherOfflineFirst(any(), any(), any())
+        } returns WeatherResult.Error("Ошибка сети")
 
         viewModel.loadWeather(55.75, 37.62, "Moscow")
         runCurrent()
@@ -115,19 +137,34 @@ class WeatherViewModelTest {
         assertTrue(viewModel.detailState is WeatherDetailState.Error)
     }
 
-    // ── Тест 7: toggleFavorite добавляет
+    @Test
+    fun `loadWeather cached shows fromCache flag`() = runTest {
+        val cachedAt = System.currentTimeMillis()
+        coEvery {
+            repository.getWeatherOfflineFirst(55.75, 37.62, "Moscow")
+        } returns WeatherResult.Cached(testWeather, cachedAt)
+
+        viewModel.loadWeather(55.75, 37.62, "Moscow")
+        runCurrent()
+
+        val state = viewModel.detailState as WeatherDetailState.Success
+        assertTrue(state.fromCache)
+        assertEquals(cachedAt, state.cachedAt)
+    }
+
     @Test
     fun `toggleFavorite calls addFavourite when city is not favourite`() = runTest {
         coEvery { repository.isFavourite(testCity.id) } returns false
+        coEvery { repository.prefetchFavourites() } just Runs
 
         viewModel.toggleFavorite(testCity)
         runCurrent()
 
         coVerify(exactly = 1) { repository.addFavourite(testCity) }
         coVerify(exactly = 0) { repository.removeFavourite(any()) }
+        coVerify(exactly = 1) { repository.prefetchFavourites() }
     }
 
-    // ── Тест 8: toggleFavorite удаляет
     @Test
     fun `toggleFavorite calls removeFavourite when city is already favourite`() = runTest {
         coEvery { repository.isFavourite(testCity.id) } returns true
@@ -137,11 +174,9 @@ class WeatherViewModelTest {
 
         coVerify(exactly = 1) { repository.removeFavourite(testCity) }
         coVerify(exactly = 0) { repository.addFavourite(any()) }
+        coVerify(exactly = 0) { repository.prefetchFavourites() }
     }
 
-    // ── Тест 9: отмена устаревшего запроса (нетривиальный, Flow)
-    // Проверяет что быстрая смена запроса отменяет предыдущий
-    // и в UI попадает только результат последнего запроса
     @Test
     fun `rapid query change cancels stale request - only last result reaches UI`() = runTest {
         val milanResult = listOf(testCity.copy(id = 2, name = "Milan"))
@@ -149,38 +184,49 @@ class WeatherViewModelTest {
         coEvery { repository.searchCities("Mo") } returns listOf(testCity)
         coEvery { repository.searchCities("Milan") } returns milanResult
 
-        // T=0: начинаем поиск "Mo" (дебаунс 500мс)
-        viewModel.onSearchQueryChange("Mo")
-        advanceTimeBy(400) // T=400 — дебаунс "Mo" ещё не сработал
+        viewModel.searchUiState.test {
+            awaitItem()
 
-        // T=400: перебиваем запрос "Milan" — "Mo" job отменяется
-        viewModel.onSearchQueryChange("Milan")
-        advanceTimeBy(600) // T=1000 — дебаунс "Milan" сработал в T=900
-        runCurrent()
+            viewModel.onSearchQueryChange("Mo")
 
-        // В UI только результат "Milan", "Mo" никогда не вызывался
-        assertEquals(SearchUiState.Success(milanResult), viewModel.searchState)
-        coVerify(exactly = 0) { repository.searchCities("Mo") }
-        coVerify(exactly = 1) { repository.searchCities("Milan") }
+            advanceTimeBy(400)
+
+            viewModel.onSearchQueryChange("Milan")
+
+            advanceTimeBy(500)
+            val loading = awaitItem()
+            assertEquals(
+                "После debounce должен быть Loading",
+                SearchUiState.Loading,
+                loading
+            )
+
+            val result = awaitItem()
+            assertTrue("Ожидали Success для Milan, получили: $result",
+                result is SearchUiState.Success)
+            val cities = (result as SearchUiState.Success).cities
+            assertEquals("Milan", cities[0].city.name)
+
+            coVerify(exactly = 0) { repository.searchCities("Mo") }
+            coVerify(exactly = 1) { repository.searchCities("Milan") }
+
+            cancel()
+        }
     }
 
-    // ── Тест 10: StateFlow favoriteCities — полная последовательность эмиссий
     @Test
     fun `favoriteCities emits correct sequence when repository flow updates`() = runTest {
         val fakeFlow = MutableStateFlow<List<CityDto>>(emptyList())
         every { repository.observeFavourites() } returns fakeFlow
 
-        val vm = WeatherViewModel(repository)
+        val vm = WeatherViewModel(repository, prefs)
 
         vm.favoriteCities.test {
-            // Начальный элемент
             assertEquals(emptyList<CityDto>(), awaitItem())
 
-            // Обновление через Room
             fakeFlow.value = listOf(testCity)
             assertEquals(listOf(testCity), awaitItem())
 
-            // Удаление
             fakeFlow.value = emptyList()
             assertEquals(emptyList<CityDto>(), awaitItem())
 

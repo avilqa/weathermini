@@ -1,13 +1,20 @@
 package com.example.weathermini
 
+import com.example.weathermini.data.datastore.AppPreferences
+import com.example.weathermini.data.datastore.AppSettings
 import com.example.weathermini.data.local.dao.FavouriteDao
+import com.example.weathermini.data.local.dao.SearchHistoryDao
+import com.example.weathermini.data.local.dao.WeatherCacheDao
+import com.example.weathermini.data.local.entity.FavouriteEntity
 import com.example.weathermini.data.model.CityDto
 import com.example.weathermini.data.model.CitySearchResponse
 import com.example.weathermini.data.model.CurrentWeather
 import com.example.weathermini.data.model.WeatherResponse
 import com.example.weathermini.data.remote.WeatherApi
 import com.example.weathermini.data.repository.WeatherRepository
+import com.google.gson.Gson
 import io.mockk.*
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.*
 import org.junit.Assert.*
@@ -16,7 +23,20 @@ class WeatherRepositoryUnitTest {
 
     private val api: WeatherApi = mockk()
     private val dao: FavouriteDao = mockk(relaxed = true)
-    private val repository = WeatherRepository(api, dao)
+
+    private val cacheDao: WeatherCacheDao = mockk(relaxed = true)
+    private val historyDao: SearchHistoryDao = mockk(relaxed = true)
+    private val prefs: AppPreferences = mockk()
+    private val gson = Gson()
+
+    private val repository: WeatherRepository
+
+    init {
+        every { dao.observeAll() } returns flowOf(emptyList<FavouriteEntity>())
+        every { prefs.settings } returns flowOf(AppSettings(cacheTtlHours = 3))
+
+        repository = WeatherRepository(api, dao, cacheDao, historyDao, prefs, gson)
+    }
 
     private val cityDto = CityDto(
         id = 1, name = "Moscow",
@@ -24,7 +44,6 @@ class WeatherRepositoryUnitTest {
         country = "Russia", region = "Oblast"
     )
 
-    // ── Тест 11: searchCities корректно маппит результат
     @Test
     fun `searchCities returns mapped list from api response`() = runTest {
         coEvery {
@@ -38,7 +57,6 @@ class WeatherRepositoryUnitTest {
         coVerify { api.searchCity(name = "Moscow") }
     }
 
-    // ── Тест 12: null в results → пустой список (не NPE)
     @Test
     fun `searchCities returns empty list when api results is null`() = runTest {
         coEvery {
@@ -50,7 +68,6 @@ class WeatherRepositoryUnitTest {
         assertTrue(result.isEmpty())
     }
 
-    // ── Тест 13: isFavourite корректно использует countById
     @Test
     fun `isFavourite returns false when count is 0 and true when count is 1`() = runTest {
         coEvery { dao.countById(1) } returns 0

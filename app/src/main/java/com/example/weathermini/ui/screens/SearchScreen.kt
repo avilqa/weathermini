@@ -4,8 +4,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,26 +24,22 @@ fun SearchScreen(
     onCityClick: (CityDto) -> Unit,
     onNavigateToFavorites: () -> Unit
 ) {
-    // Подписываемся на единый StateFlow (compose из 3 источников)
-    val state by viewModel.searchUiState.collectAsState()
-    val query by viewModel.searchQuery.collectAsState()
+    val state    by viewModel.searchUiState.collectAsState()
+    val query    by viewModel.searchQuery.collectAsState()
     val sortMode by viewModel.sortMode.collectAsState()
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Weather Mini") },
-                actions = {
-                    IconButton(onClick = onNavigateToFavorites) {
-                        Icon(Icons.Default.Favorite, contentDescription = null, tint = Color.Red)
-                    }
-                }
+                title = { Text("Weather Mini") }
             )
         }
     ) { padding ->
-        Column(modifier = Modifier.padding(padding).padding(16.dp)) {
-
-            // Поле поиска
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .padding(16.dp)
+        ) {
             OutlinedTextField(
                 value = query,
                 onValueChange = { viewModel.onSearchQueryChange(it) },
@@ -55,7 +51,6 @@ fun SearchScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Сортировка — источник №2 (пользовательский выбор)
             SortModeSelector(
                 current = sortMode,
                 onSelect = { viewModel.onSortModeChange(it) }
@@ -63,7 +58,6 @@ fun SearchScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Результат из searchResults + favIds + sortMode
             when (state) {
                 is SearchUiState.Loading -> Box(
                     modifier = Modifier.fillMaxSize(),
@@ -103,12 +97,11 @@ fun SearchScreen(
 @Composable
 private fun SortModeSelector(current: SortMode, onSelect: (SortMode) -> Unit) {
     val modes = listOf(
-        SortMode.DEFAULT  to "По умолчанию",
-        SortMode.NAME_ASC to "А → Я",
+        SortMode.DEFAULT   to "По умолчанию",
+        SortMode.NAME_ASC  to "А → Я",
         SortMode.NAME_DESC to "Я → А",
-        SortMode.COUNTRY  to "По стране"
+        SortMode.COUNTRY   to "По стране"
     )
-
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         modes.forEach { (mode, label) ->
             FilterChip(
