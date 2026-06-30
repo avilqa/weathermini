@@ -1,117 +1,167 @@
 package com.example.weathermini
 
-import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasProgressBarRangeInfo
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNode
+import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.example.weathermini.data.datastore.AppPreferences
 import com.example.weathermini.data.datastore.AppSettings
 import com.example.weathermini.data.model.CurrentWeather
 import com.example.weathermini.data.model.WeatherResponse
-import com.example.weathermini.data.repository.WeatherRepository
-import com.example.weathermini.ui.WeatherViewModel
+import com.example.weathermini.ui.WeatherDetailState
 import com.example.weathermini.ui.screens.DetailScreen
-import io.mockk.*
-import kotlinx.coroutines.flow.flowOf
-import org.junit.*
-import org.junit.Assert.*
+import com.example.weathermini.ui.theme.WeatherMiniTheme
+import org.junit.Rule
+import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class DetailScreenTest {
 
     @get:Rule
-    val composeTestRule = createComposeRule()
+    val composeRule = createComposeRule()
 
-    private fun makeViewModel(
-        weatherResult: suspend () -> WeatherResponse
-    ): WeatherViewModel {
-        val repo = mockk<WeatherRepository>(relaxed = true)
-        val prefs = mockk<AppPreferences>(relaxed = true)
-
-        every { repo.observeFavourites() } returns flowOf(emptyList())
-        every { prefs.settings } returns flowOf(AppSettings())
-        coEvery { repo.getWeather(any(), any()) } coAnswers { weatherResult() }
-
-        return WeatherViewModel(repo, prefs)
-    }
+    private val weatherResult = WeatherResponse(
+        CurrentWeather(temperature = 22.0, windSpeed = 4.0, weatherCode = 1)
+    )
 
     @Test
-    fun detailScreen_shows_Retry_on_error() {
-        val viewModel = makeViewModel { throw Exception("Network error") }
-
-        composeTestRule.setContent {
-            DetailScreen(
-                viewModel = viewModel,
-                lat = 55.75,
-                lon = 37.62,
-                cityName = "Moscow",
-                onBack = {},
-                onOpenNotes = { _, _, _ -> }
-            )
-        }
-
-        composeTestRule.waitUntil(timeoutMillis = 5_000) {
-            composeTestRule.onAllNodesWithText("Retry").fetchSemanticsNodes().isNotEmpty()
-        }
-
-        composeTestRule.onNodeWithText("Retry").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Не удалось загрузить").assertIsDisplayed()
-    }
-
-    @Test
-    fun clicking_Retry_triggers_new_request_and_shows_Success() {
-        var callCount = 0
-
-        val successWeather = WeatherResponse(
-            CurrentWeather(
-                temperature = 15.0,
-                windSpeed = 3.0,
-                weatherCode = 0
-            )
+    fun detailScreen_shows_temperature_on_success() {
+        val state = WeatherDetailState.Success(
+            weather = weatherResult,
+            cityName = "Moscow",
+            fromCache = false
         )
 
-        val repo = mockk<WeatherRepository>(relaxed = true)
-        val prefs = mockk<AppPreferences>(relaxed = true)
-
-        every { repo.observeFavourites() } returns flowOf(emptyList())
-        every { prefs.settings } returns flowOf(AppSettings())
-        coEvery { repo.getWeather(any(), any()) } coAnswers {
-            callCount++
-            if (callCount == 1) {
-                throw Exception("First attempt fails")
-            } else {
-                successWeather
+        composeRule.setContent {
+            WeatherMiniTheme {
+                DetailScreen(
+                    state = state,
+                    settings = AppSettings(),
+                    onBack = {},
+                    onRetry = {},
+                    onOpenNotes = {}
+                )
             }
         }
 
-        val viewModel = WeatherViewModel(repo, prefs)
+        composeRule.onNodeWithText("22°C", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Moscow").assertIsDisplayed()
+    }
 
-        composeTestRule.setContent {
-            DetailScreen(
-                viewModel = viewModel,
-                lat = 55.75,
-                lon = 37.62,
-                cityName = "Moscow",
-                onBack = {},
-                onOpenNotes = { _, _, _ -> }
-            )
+    @Test
+    fun detailScreen_shows_cache_badge_when_from_cache() {
+        val state = WeatherDetailState.Success(
+            weather = weatherResult,
+            cityName = "Moscow",
+            fromCache = true,
+            cachedAt = System.currentTimeMillis() - 3600_000L
+        )
+
+        composeRule.setContent {
+            WeatherMiniTheme {
+                DetailScreen(
+                    state = state,
+                    settings = AppSettings(),
+                    onBack = {},
+                    onRetry = {},
+                    onOpenNotes = {}
+                )
+            }
         }
 
-        composeTestRule.waitUntil(timeoutMillis = 5_000) {
-            composeTestRule.onAllNodesWithText("Retry").fetchSemanticsNodes().isNotEmpty()
+        composeRule.onNodeWithText("📦", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun detailScreen_shows_error_banner_and_stale_data_on_StaleError() {
+        val state = WeatherDetailState.StaleError(
+            weather = weatherResult,
+            cityName = "Moscow",
+            errorMessage = "Нет сети"
+        )
+
+        composeRule.setContent {
+            WeatherMiniTheme {
+                DetailScreen(
+                    state = state,
+                    settings = AppSettings(),
+                    onBack = {},
+                    onRetry = {},
+                    onOpenNotes = {}
+                )
+            }
         }
 
-        composeTestRule.onNodeWithText("Retry").assertIsDisplayed()
-        val countAfterFirst = callCount
+        composeRule.onNodeWithText("Нет сети — показаны устаревшие данные", substring = true)
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("22°C", substring = true).assertIsDisplayed()
+    }
 
-        composeTestRule.onNodeWithText("Retry").performClick()
+    @Test
+    fun detailScreen_shows_retry_button_on_error() {
+        var retryClicked = false
+        val state = WeatherDetailState.Error("Нет подключения")
 
-        composeTestRule.waitUntil(timeoutMillis = 5_000) {
-            composeTestRule.onAllNodesWithText("15.0°C").fetchSemanticsNodes().isNotEmpty()
+        composeRule.setContent {
+            WeatherMiniTheme {
+                DetailScreen(
+                    state = state,
+                    settings = AppSettings(),
+                    onBack = {},
+                    onRetry = { retryClicked = true },
+                    onOpenNotes = {}
+                )
+            }
         }
 
-        assertTrue("Retry должен вызвать новый запрос", callCount > countAfterFirst)
-        composeTestRule.onNodeWithText("15.0°C").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Retry").assertDoesNotExist()
+        composeRule.onNodeWithText("Повторить").assertIsDisplayed()
+        composeRule.onNodeWithText("Повторить").performClick()
+        assert(retryClicked)
+    }
+
+    @Test
+    fun detailScreen_shows_progress_indicator_on_loading() {
+        composeRule.setContent {
+            WeatherMiniTheme {
+                DetailScreen(
+                    state = WeatherDetailState.Loading,
+                    settings = AppSettings(),
+                    onBack = {},
+                    onRetry = {},
+                    onOpenNotes = {}
+                )
+            }
+        }
+
+        composeRule.onNode(hasProgressBarRangeInfo(ProgressBarRangeInfo.Indeterminate))
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun detailScreen_onOpenNotes_called_when_notes_button_clicked() {
+        var notesCityName = ""
+        val state = WeatherDetailState.Success(
+            weather = weatherResult,
+            cityName = "Moscow"
+        )
+
+        composeRule.setContent {
+            WeatherMiniTheme {
+                DetailScreen(
+                    state = state,
+                    settings = AppSettings(),
+                    onBack = {},
+                    onRetry = {},
+                    onOpenNotes = { city -> notesCityName = city }
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Заметки для Moscow", substring = true).performClick()
+        assert(notesCityName == "Moscow")
     }
 }

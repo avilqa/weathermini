@@ -99,6 +99,7 @@ dependencies {
     androidTestImplementation("app.cash.turbine:turbine:1.1.0")
     androidTestImplementation("io.mockk:mockk-android:1.13.10")
     androidTestImplementation("io.mockk:mockk-agent:1.13.10")
+    androidTestImplementation("androidx.work:work-testing:2.9.1")
     androidTestImplementation("com.google.dagger:hilt-android-testing:2.51.1")
     kspAndroidTest("com.google.dagger:hilt-android-compiler:2.51.1")
     kspAndroidTest(libs.hilt.work.compiler)

@@ -9,13 +9,17 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.weathermini.data.local.entity.SearchHistoryEntity
-import com.example.weathermini.ui.HistoryViewModel
+import com.example.weathermini.ui.HistoryUiState
+import com.example.weathermini.util.WeatherCodeUtils
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -23,11 +27,12 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(
-    onBack: () -> Unit,
-    viewModel: HistoryViewModel = hiltViewModel()
+    state: HistoryUiState,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onClearHistory: () -> Unit,
+    onBack: () -> Unit
 ) {
-    val state by viewModel.uiState.collectAsState()
-    val query by viewModel.query.collectAsState()
     var showClearDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -36,7 +41,7 @@ fun HistoryScreen(
                 title = { Text("История поиска") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
                     }
                 },
                 actions = {
@@ -47,10 +52,8 @@ fun HistoryScreen(
                         Icon(
                             Icons.Default.Delete,
                             contentDescription = "Очистить",
-                            tint = if (!state.isEmpty)
-                                MaterialTheme.colorScheme.error
-                            else
-                                MaterialTheme.colorScheme.onSurfaceVariant
+                            tint = if (!state.isEmpty) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -58,36 +61,30 @@ fun HistoryScreen(
         }
     ) { padding ->
         Column(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
-                .padding(horizontal = 16.dp)
+            modifier = Modifier.padding(padding).fillMaxSize().padding(horizontal = 16.dp)
         ) {
             Spacer(Modifier.height(8.dp))
-
-            // Строка фильтрации
             OutlinedTextField(
                 value = query,
-                onValueChange = viewModel::onQueryChange,
+                onValueChange = onQueryChange,
                 label = { Text("Фильтр по городу") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                leadingIcon = { Icon(Icons.Default.Search, null) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 trailingIcon = {
                     if (query.isNotEmpty()) {
-                        IconButton(onClick = { viewModel.onQueryChange("") }) {
-                            Icon(Icons.Default.Close, "Сбросить")
+                        IconButton(onClick = { onQueryChange("") }) {
+                            Icon(Icons.Default.Close, contentDescription = "Сбросить")
                         }
                     }
                 }
             )
-
             Spacer(Modifier.height(12.dp))
 
             if (state.isEmpty) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        text = if (query.isBlank()) "История пуста" else "Ничего не найдено",
+                        if (query.isBlank()) "История пуста" else "Ничего не найдено",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -105,14 +102,12 @@ fun HistoryScreen(
         AlertDialog(
             onDismissRequest = { showClearDialog = false },
             title = { Text("Очистить историю?") },
-            text = { Text("Все записи будут удалены без возможности восстановления.") },
+            text  = { Text("Все записи будут удалены без возможности восстановления.") },
             confirmButton = {
                 TextButton(onClick = {
-                    viewModel.clearHistory()
+                    onClearHistory()
                     showClearDialog = false
-                }) {
-                    Text("Очистить", color = MaterialTheme.colorScheme.error)
-                }
+                }) { Text("Очистить", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
                 TextButton(onClick = { showClearDialog = false }) { Text("Отмена") }
@@ -125,14 +120,11 @@ fun HistoryScreen(
 private fun HistoryItemCard(item: SearchHistoryEntity) {
     val fmt = SimpleDateFormat("dd.MM.yyyy  HH:mm", Locale.getDefault())
     Card(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(item.cityName, style = MaterialTheme.typography.titleSmall)
                 Text(
-                    "${item.temperature.toInt()}°C · ${weatherCodeToDescription(item.weatherCode)}",
+                    "${item.temperature.toInt()}°C · ${WeatherCodeUtils.toDescription(item.weatherCode)}",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(
@@ -147,7 +139,7 @@ private fun HistoryItemCard(item: SearchHistoryEntity) {
                     shape = MaterialTheme.shapes.extraSmall
                 ) {
                     Text(
-                        text = "кэш",
+                        "кэш",
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSecondaryContainer
@@ -156,19 +148,4 @@ private fun HistoryItemCard(item: SearchHistoryEntity) {
             }
         }
     }
-}
-
-private fun weatherCodeToDescription(code: Int): String = when (code) {
-    0          -> "Ясно"
-    1          -> "Преимущественно ясно"
-    2          -> "Переменная облачность"
-    3          -> "Пасмурно"
-    45, 48     -> "Туман"
-    51,53,55   -> "Морось"
-    61,63,65   -> "Дождь"
-    71,73,75   -> "Снег"
-    80,81,82   -> "Ливни"
-    95         -> "Гроза"
-    96,99      -> "Гроза с градом"
-    else       -> "Код $code"
 }

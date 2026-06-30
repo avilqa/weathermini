@@ -5,44 +5,37 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.example.weathermini.data.model.CityDto
+import com.example.weathermini.ui.CityUiItem
 import com.example.weathermini.ui.SearchUiState
 import com.example.weathermini.ui.SortMode
-import com.example.weathermini.ui.WeatherViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
-    viewModel: WeatherViewModel,
+    state: SearchUiState,
+    query: String,
+    sortMode: SortMode,
+    onQueryChange: (String) -> Unit,
+    onSortModeChange: (SortMode) -> Unit,
     onCityClick: (CityDto) -> Unit,
-    onNavigateToFavorites: () -> Unit
+    onToggleFavourite: (CityDto) -> Unit
 ) {
-    val state    by viewModel.searchUiState.collectAsState()
-    val query    by viewModel.searchQuery.collectAsState()
-    val sortMode by viewModel.sortMode.collectAsState()
-
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Weather Mini") }
-            )
+            TopAppBar(title = { Text("Weather Mini") })
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .padding(16.dp)
-        ) {
+        Column(modifier = Modifier.padding(padding).padding(16.dp)) {
             OutlinedTextField(
                 value = query,
-                onValueChange = { viewModel.onSearchQueryChange(it) },
+                onValueChange = onQueryChange,
                 label = { Text("Поиск города") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 modifier = Modifier.fillMaxWidth(),
@@ -51,10 +44,7 @@ fun SearchScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            SortModeSelector(
-                current = sortMode,
-                onSelect = { viewModel.onSortModeChange(it) }
-            )
+            SortModeSelector(current = sortMode, onSelect = onSortModeChange)
 
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -69,23 +59,21 @@ fun SearchScreen(
 
                 is SearchUiState.Error ->
                     Text(
-                        text = (state as SearchUiState.Error).message,
+                        text = state.message,
                         color = MaterialTheme.colorScheme.error
                     )
 
-                is SearchUiState.Success -> {
-                    val items = (state as SearchUiState.Success).cities
+                is SearchUiState.Success ->
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        items(items, key = { it.city.id }) { item ->
+                        items(state.cities, key = { it.city.id }) { item ->
                             CityItem(
                                 city = item.city,
                                 isFavorite = item.isFavourite,
                                 onClick = { onCityClick(item.city) },
-                                onFavoriteClick = { viewModel.toggleFavorite(item.city) }
+                                onFavoriteClick = { onToggleFavourite(item.city) }
                             )
                         }
                     }
-                }
 
                 is SearchUiState.Idle ->
                     Text("Введите название города", color = Color.Gray)
@@ -96,14 +84,13 @@ fun SearchScreen(
 
 @Composable
 private fun SortModeSelector(current: SortMode, onSelect: (SortMode) -> Unit) {
-    val modes = listOf(
-        SortMode.DEFAULT   to "По умолчанию",
-        SortMode.NAME_ASC  to "А → Я",
-        SortMode.NAME_DESC to "Я → А",
-        SortMode.COUNTRY   to "По стране"
-    )
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        modes.forEach { (mode, label) ->
+        listOf(
+            SortMode.DEFAULT   to "По умолчанию",
+            SortMode.NAME_ASC  to "А → Я",
+            SortMode.NAME_DESC to "Я → А",
+            SortMode.COUNTRY   to "По стране"
+        ).forEach { (mode, label) ->
             FilterChip(
                 selected = current == mode,
                 onClick = { onSelect(mode) },

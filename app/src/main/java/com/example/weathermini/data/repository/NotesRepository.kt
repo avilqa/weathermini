@@ -10,8 +10,8 @@ import javax.inject.Singleton
 class NotesRepository @Inject constructor(
     private val dao: WeatherNoteDao
 ) {
-    fun observeByCity(cityName: String): Flow<List<WeatherNoteEntity>> =
-        dao.observeByCity(cityName)
+    fun observeByLocation(cityName: String, lat: Double, lon: Double): Flow<List<WeatherNoteEntity>> =
+        dao.observeByLocation(cityName, lat, lon)
 
     fun observeAll(): Flow<List<WeatherNoteEntity>> =
         dao.observeAll()

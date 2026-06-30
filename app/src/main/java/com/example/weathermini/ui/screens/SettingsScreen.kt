@@ -6,21 +6,31 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.example.weathermini.data.datastore.AppSettings
 import com.example.weathermini.data.datastore.AppTheme
 import com.example.weathermini.data.datastore.TemperatureUnit
-import com.example.weathermini.ui.WeatherViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    onBack: () -> Unit,
-    viewModel: WeatherViewModel
+    settings: AppSettings,
+    onSetTemperatureUnit: (TemperatureUnit) -> Unit,
+    onSetTheme: (AppTheme) -> Unit,
+    onCacheTtlChanged: (Int) -> Unit,
+    onBackgroundSyncChanged: (Boolean) -> Unit,
+    onBack: () -> Unit
 ) {
-    val settings by viewModel.settings.collectAsState()
+    var sliderValue by remember(settings.cacheTtlHours) {
+        mutableStateOf(settings.cacheTtlHours.toFloat())
+    }
 
     Scaffold(
         topBar = {
@@ -28,7 +38,7 @@ fun SettingsScreen(
                 title = { Text("Настройки") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
                     }
                 }
             )
@@ -42,18 +52,17 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-
             SettingsSection("Единица температуры") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(
                         selected = settings.temperatureUnit == TemperatureUnit.CELSIUS,
-                        onClick = { viewModel.setTemperatureUnit(TemperatureUnit.CELSIUS) }
+                        onClick  = { onSetTemperatureUnit(TemperatureUnit.CELSIUS) }
                     )
                     Text("Цельсий (°C)")
                     Spacer(Modifier.width(24.dp))
                     RadioButton(
                         selected = settings.temperatureUnit == TemperatureUnit.FAHRENHEIT,
-                        onClick = { viewModel.setTemperatureUnit(TemperatureUnit.FAHRENHEIT) }
+                        onClick  = { onSetTemperatureUnit(TemperatureUnit.FAHRENHEIT) }
                     )
                     Text("Фаренгейт (°F)")
                 }
@@ -67,13 +76,10 @@ fun SettingsScreen(
                     AppTheme.LIGHT  to "Светлая",
                     AppTheme.DARK   to "Тёмная"
                 ).forEach { (theme, label) ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(vertical = 2.dp)
-                    ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(
                             selected = settings.theme == theme,
-                            onClick = { viewModel.setTheme(theme) }
+                            onClick  = { onSetTheme(theme) }
                         )
                         Text(label)
                     }
@@ -82,10 +88,11 @@ fun SettingsScreen(
 
             HorizontalDivider()
 
-            SettingsSection("Время жизни кэша: ${settings.cacheTtlHours} ч") {
+            SettingsSection("Время жизни кэша: ${sliderValue.toInt()} ч") {
                 Slider(
-                    value = settings.cacheTtlHours.toFloat(),
-                    onValueChange = { viewModel.setCacheTtlHours(it.toInt()) },
+                    value = sliderValue,
+                    onValueChange = { sliderValue = it },
+                    onValueChangeFinished = { onCacheTtlChanged(sliderValue.toInt()) },
                     valueRange = 1f..24f,
                     steps = 22,
                     modifier = Modifier.fillMaxWidth()
@@ -110,14 +117,17 @@ fun SettingsScreen(
                     Column(Modifier.weight(1f)) {
                         Text("Автообновление избранных")
                         Text(
-                            "Каждые 6 часов при наличии сети",
+                            if (settings.backgroundSyncEnabled)
+                                "Каждые 6 ч при наличии сети • активно"
+                            else
+                                "Выключено",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Switch(
                         checked = settings.backgroundSyncEnabled,
-                        onCheckedChange = { viewModel.setBackgroundSyncEnabled(it) }
+                        onCheckedChange = onBackgroundSyncChanged
                     )
                 }
             }
@@ -128,7 +138,7 @@ fun SettingsScreen(
 @Composable
 private fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
     Text(
-        text = title,
+        title,
         style = MaterialTheme.typography.titleMedium,
         color = MaterialTheme.colorScheme.primary
     )

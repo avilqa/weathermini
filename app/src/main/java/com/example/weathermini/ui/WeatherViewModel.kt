@@ -5,18 +5,23 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.WorkManager
 import com.example.weathermini.data.datastore.AppPreferences
 import com.example.weathermini.data.datastore.AppSettings
+import com.example.weathermini.data.datastore.AppTheme
 import com.example.weathermini.data.datastore.TemperatureUnit
 import com.example.weathermini.data.model.CityDto
 import com.example.weathermini.data.model.WeatherResponse
 import com.example.weathermini.data.repository.WeatherRepository
 import com.example.weathermini.data.repository.WeatherResult
+import com.example.weathermini.worker.WeatherSyncWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
 
 
 data class CityUiItem(
@@ -32,19 +37,23 @@ sealed interface SearchUiState {
     data class Error(val message: String) : SearchUiState
 }
 
-
 sealed interface WeatherDetailState {
     object Loading : WeatherDetailState
+
     data class Success(
         val weather: WeatherResponse,
         val cityName: String,
         val fromCache: Boolean = false,
         val cachedAt: Long? = null
     ) : WeatherDetailState
-    data class Error(
-        val message: String,
-        val stale: WeatherResponse? = null
+
+    data class StaleError(
+        val weather: WeatherResponse,
+        val cityName: String,
+        val errorMessage: String
     ) : WeatherDetailState
+
+    data class Error(val message: String) : WeatherDetailState
 }
 
 
@@ -52,7 +61,8 @@ sealed interface WeatherDetailState {
 @HiltViewModel
 class WeatherViewModel @Inject constructor(
     private val repository: WeatherRepository,
-    private val prefs: AppPreferences
+    private val prefs: AppPreferences,
+    private val workManager: WorkManager
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -66,8 +76,11 @@ class WeatherViewModel @Inject constructor(
         .map { list -> list.map { it.id }.toSet() }
 
     val settings: StateFlow<AppSettings> = prefs.settings
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppSettings())
-
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = AppSettings()
+        )
 
     private val searchResultsFlow: Flow<SearchUiState> = _searchQuery
         .debounce(500L)
@@ -117,8 +130,6 @@ class WeatherViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = SearchUiState.Idle
     )
-
-
     val favoriteCities: StateFlow<List<CityDto>> = repository
         .observeFavourites()
         .stateIn(
@@ -126,7 +137,6 @@ class WeatherViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyList()
         )
-
 
     var detailState: WeatherDetailState by mutableStateOf(WeatherDetailState.Loading)
         private set
@@ -136,23 +146,22 @@ class WeatherViewModel @Inject constructor(
         viewModelScope.launch {
             detailState = when (val result = repository.getWeatherOfflineFirst(lat, lon, name)) {
                 is WeatherResult.Fresh -> WeatherDetailState.Success(
-                    weather = result.weather,
-                    cityName = name,
+                    weather   = result.weather,
+                    cityName  = name,
                     fromCache = false
                 )
                 is WeatherResult.Cached -> WeatherDetailState.Success(
-                    weather = result.weather,
-                    cityName = name,
+                    weather   = result.weather,
+                    cityName  = name,
                     fromCache = true,
-                    cachedAt = result.cachedAt
+                    cachedAt  = result.cachedAt
                 )
                 is WeatherResult.Error -> {
                     if (result.stale != null) {
-                        WeatherDetailState.Success(
-                            weather = result.stale,
-                            cityName = name,
-                            fromCache = true,
-                            cachedAt = null
+                        WeatherDetailState.StaleError(
+                            weather      = result.stale,
+                            cityName     = name,
+                            errorMessage = result.message
                         )
                     } else {
                         WeatherDetailState.Error(result.message)
@@ -163,9 +172,13 @@ class WeatherViewModel @Inject constructor(
     }
 
 
-    fun onSearchQueryChange(query: String) { _searchQuery.value = query }
+    fun onSearchQueryChange(query: String) {
+        _searchQuery.value = query
+    }
 
-    fun onSortModeChange(mode: SortMode) { _sortMode.value = mode }
+    fun onSortModeChange(mode: SortMode) {
+        _sortMode.value = mode
+    }
 
     fun toggleFavorite(city: CityDto) {
         viewModelScope.launch {
@@ -183,15 +196,28 @@ class WeatherViewModel @Inject constructor(
         viewModelScope.launch { prefs.setTemperatureUnit(unit) }
     }
 
-    fun setTheme(theme: com.example.weathermini.data.datastore.AppTheme) {
+    fun setTheme(theme: AppTheme) {
         viewModelScope.launch { prefs.setTheme(theme) }
     }
 
     fun setCacheTtlHours(hours: Int) {
-        viewModelScope.launch { prefs.setCacheTtlHours(hours) }
+        viewModelScope.launch {
+            runCatching { prefs.setCacheTtlHours(hours) }
+        }
     }
 
     fun setBackgroundSyncEnabled(enabled: Boolean) {
-        viewModelScope.launch { prefs.setBackgroundSyncEnabled(enabled) }
+        viewModelScope.launch {
+            prefs.setBackgroundSyncEnabled(enabled)
+            if (enabled) {
+                workManager.enqueueUniquePeriodicWork(
+                    WeatherSyncWorker.WORK_NAME,
+                    ExistingPeriodicWorkPolicy.UPDATE,
+                    WeatherSyncWorker.buildRequest()
+                )
+            } else {
+                workManager.cancelUniqueWork(WeatherSyncWorker.WORK_NAME)
+            }
+        }
     }
 }

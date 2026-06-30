@@ -21,33 +21,25 @@ class NotesViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
-    val cityName: String = checkNotNull(savedStateHandle["cityName"])
-    private val lat: Double = checkNotNull(savedStateHandle["lat"])
-    private val lon: Double = checkNotNull(savedStateHandle["lon"])
+    val cityName: String  = checkNotNull(savedStateHandle["cityName"])
+    private val lat: Double = checkNotNull(savedStateHandle.get<Float>("lat"))?.toDouble()
+        ?: error("lat required")
+    private val lon: Double = checkNotNull(savedStateHandle.get<Float>("lon"))?.toDouble()
+        ?: error("lon required")
 
-    val uiState: StateFlow<NotesUiState> = repository.observeByCity(cityName)
-        .map { notes -> NotesUiState(notes = notes, cityName = cityName) }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = NotesUiState(cityName = cityName)
-        )
+    val uiState: StateFlow<NotesUiState> =
+        repository.observeByLocation(cityName, lat, lon)
+            .map { notes -> NotesUiState(notes = notes, cityName = cityName) }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = NotesUiState(cityName = cityName)
+            )
 
-    fun addNote(
-        content: String,
-        temperature: Double,
-        weatherCode: Int
-    ) {
+    fun addNote(content: String, temperature: Double, weatherCode: Int) {
         if (content.isBlank()) return
         viewModelScope.launch {
-            repository.addNote(
-                cityName = cityName,
-                lat = lat,
-                lon = lon,
-                content = content.trim(),
-                temperature = temperature,
-                weatherCode = weatherCode
-            )
+            repository.addNote(cityName, lat, lon, content.trim(), temperature, weatherCode)
         }
     }
 

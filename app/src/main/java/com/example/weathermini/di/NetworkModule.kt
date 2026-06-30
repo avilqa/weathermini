@@ -10,6 +10,9 @@ import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import javax.inject.Singleton
+import android.content.Context
+import androidx.work.WorkManager
+import dagger.hilt.android.qualifiers.ApplicationContext
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -39,4 +42,9 @@ object NetworkModule {
     @Singleton
     fun provideWeatherApi(retrofit: Retrofit): WeatherApi =
         retrofit.create(WeatherApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideWorkManager(@ApplicationContext context: Context): WorkManager =
+        WorkManager.getInstance(context)
 }

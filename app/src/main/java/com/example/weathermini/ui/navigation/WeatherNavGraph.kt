@@ -1,5 +1,6 @@
 package com.example.weathermini.ui.navigation
 
+import android.net.Uri
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
@@ -7,7 +8,10 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -18,10 +22,11 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.example.weathermini.data.model.CityDto
+import com.example.weathermini.ui.HistoryViewModel
+import com.example.weathermini.ui.NotesViewModel
+import com.example.weathermini.ui.WeatherDetailState
 import com.example.weathermini.ui.WeatherViewModel
 import com.example.weathermini.ui.screens.*
-
 
 private data class BottomTab(
     val route: String,
@@ -36,7 +41,10 @@ private val bottomTabs = listOf(
     BottomTab("settings", "Настройки", Icons.Default.Settings),
 )
 
-private val noBottomBarRoutes = setOf("detail/{lat}/{lon}/{name}", "notes/{cityName}/{lat}/{lon}")
+private val noBottomBarRoutes = setOf(
+    "detail/{lat}/{lon}/{name}",
+    "notes/{cityName}/{lat}/{lon}/{temp}/{code}"
+)
 
 @Composable
 fun WeatherNavGraph() {
@@ -44,8 +52,7 @@ fun WeatherNavGraph() {
     val viewModel: WeatherViewModel = hiltViewModel()
 
     val currentEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = currentEntry?.destination?.route
-    val showBottomBar = currentRoute !in noBottomBarRoutes
+    val showBottomBar = currentEntry?.destination?.route !in noBottomBarRoutes
 
     Scaffold(
         bottomBar = {
@@ -53,7 +60,7 @@ fun WeatherNavGraph() {
                 NavigationBar {
                     bottomTabs.forEach { tab ->
                         NavigationBarItem(
-                            selected = currentRoute == tab.route,
+                            selected = currentEntry?.destination?.route == tab.route,
                             onClick = {
                                 navController.navigate(tab.route) {
                                     popUpTo(navController.graph.findStartDestination().id) {
@@ -78,30 +85,37 @@ fun WeatherNavGraph() {
         ) {
 
             composable("search") {
+                val state    by viewModel.searchUiState.collectAsState()
+                val query    by viewModel.searchQuery.collectAsState()
+                val sortMode by viewModel.sortMode.collectAsState()
+
                 SearchScreen(
-                    viewModel = viewModel,
+                    state = state,
+                    query = query,
+                    sortMode = sortMode,
+                    onQueryChange = viewModel::onSearchQueryChange,
+                    onSortModeChange = viewModel::onSortModeChange,
+                    onToggleFavourite = viewModel::toggleFavorite,
                     onCityClick = { city ->
                         navController.navigate(
-                            "detail/${city.latitude}/${city.longitude}/${city.name}"
+                            "detail/${city.latitude}/${city.longitude}/${Uri.encode(city.name)}"
                         )
-                    },
-                    onNavigateToFavorites = {
-                        navController.navigate("favorites")
                     }
                 )
             }
 
             composable("favorites") {
                 val favorites by viewModel.favoriteCities.collectAsState()
+
                 FavoritesScreen(
                     favorites = favorites,
+                    onFavoriteClick = viewModel::toggleFavorite,
+                    onBack = { navController.popBackStack() },
                     onCityClick = { city ->
                         navController.navigate(
-                            "detail/${city.latitude}/${city.longitude}/${city.name}"
+                            "detail/${city.latitude}/${city.longitude}/${Uri.encode(city.name)}"
                         )
-                    },
-                    onFavoriteClick = { city -> viewModel.toggleFavorite(city) },
-                    onBack = { navController.popBackStack() }
+                    }
                 )
             }
 
@@ -116,45 +130,79 @@ fun WeatherNavGraph() {
                 val lat  = backStack.arguments?.getFloat("lat")?.toDouble() ?: 0.0
                 val lon  = backStack.arguments?.getFloat("lon")?.toDouble() ?: 0.0
                 val name = backStack.arguments?.getString("name") ?: ""
+                val settings by viewModel.settings.collectAsState()
+
+                LaunchedEffect(lat, lon) { viewModel.loadWeather(lat, lon, name) }
+
                 DetailScreen(
-                    viewModel = viewModel,
-                    lat = lat,
-                    lon = lon,
-                    cityName = name,
-                    onBack = { navController.popBackStack() },
-                    onOpenNotes = { cityName, noteLat, noteLon ->   // НОВОЕ
-                        navController.navigate("notes/$cityName/$noteLat/$noteLon")
+                    state    = viewModel.detailState,
+                    settings = settings,
+                    onBack   = { navController.popBackStack() },
+                    onRetry  = { viewModel.loadWeather(lat, lon, name) },
+                    onOpenNotes = { cityName ->
+                        val weather = when (val s = viewModel.detailState) {
+                            is WeatherDetailState.Success    -> s.weather
+                            is WeatherDetailState.StaleError -> s.weather
+                            else                              -> null
+                        }
+                        val temp = weather?.currentWeather?.temperature ?: 0.0
+                        val code = weather?.currentWeather?.weatherCode ?: 0
+                        navController.navigate(
+                            "notes/${Uri.encode(cityName)}/$lat/$lon/$temp/$code"
+                        )
                     }
                 )
             }
 
             composable("history") {
+                val historyViewModel: HistoryViewModel = hiltViewModel()
+                val state by historyViewModel.uiState.collectAsState()
+                val query by historyViewModel.query.collectAsState()
+
                 HistoryScreen(
+                    state = state,
+                    query = query,
+                    onQueryChange = historyViewModel::onQueryChange,
+                    onClearHistory = historyViewModel::clearHistory,
                     onBack = { navController.popBackStack() }
                 )
             }
 
             composable(
-                route = "notes/{cityName}/{lat}/{lon}",
+                route = "notes/{cityName}/{lat}/{lon}/{temp}/{code}",
                 arguments = listOf(
                     navArgument("cityName") { type = NavType.StringType },
-                    navArgument("lat")      { type = NavType.FloatType },
-                    navArgument("lon")      { type = NavType.FloatType }
+                    navArgument("lat")  { type = NavType.FloatType },
+                    navArgument("lon")  { type = NavType.FloatType },
+                    navArgument("temp") { type = NavType.FloatType },
+                    navArgument("code") { type = NavType.IntType }
                 )
             ) { backStack ->
-                val detailSuccess = viewModel.detailState as?
-                        com.example.weathermini.ui.WeatherDetailState.Success
+                val temp = backStack.arguments?.getFloat("temp")?.toDouble() ?: 0.0
+                val code = backStack.arguments?.getInt("code") ?: 0
+
+                val notesViewModel: NotesViewModel = hiltViewModel()
+                val state by notesViewModel.uiState.collectAsState()
+
                 NotesScreen(
-                    onBack = { navController.popBackStack() },
-                    temperature = detailSuccess?.weather?.currentWeather?.temperature ?: 0.0,
-                    weatherCode = detailSuccess?.weather?.currentWeather?.weatherCode ?: 0
+                    state = state,
+                    onAddNote = { content -> notesViewModel.addNote(content, temp, code) },
+                    onUpdateNote = { entity, text -> notesViewModel.updateNote(entity, text) },
+                    onDeleteNote = notesViewModel::deleteNote,
+                    onBack = { navController.popBackStack() }
                 )
             }
 
             composable("settings") {
+                val settings by viewModel.settings.collectAsState()
+
                 SettingsScreen(
-                    onBack = { navController.popBackStack() },
-                    viewModel = viewModel
+                    settings = settings,
+                    onSetTemperatureUnit = viewModel::setTemperatureUnit,
+                    onSetTheme = viewModel::setTheme,
+                    onCacheTtlChanged = viewModel::setCacheTtlHours,
+                    onBackgroundSyncChanged = viewModel::setBackgroundSyncEnabled,
+                    onBack = { navController.popBackStack() }
                 )
             }
         }
